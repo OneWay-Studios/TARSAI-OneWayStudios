@@ -30,7 +30,7 @@ Core stack:
 
 ```
 LLM Engine      → Groq Llama 3.1-8B
-Voice Engine    → Kokoro-ONNX
+Voice Engine    → Kokoro-ONNX by by thewh1teagle/kokoro-onnx Repo.
 Language        → Python 3.10+
 Interface       → Terminal
 ```
