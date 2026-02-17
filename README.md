@@ -32,7 +32,7 @@ Core stack:
 LLM Engine      → Groq Llama 3.1-8B
 Voice Engine    → Kokoro-ONNX
 Language        → Python 3.10+
-Interface       → Web + Terminal
+Interface       → Terminal
 ```
 
 ---
@@ -64,7 +64,7 @@ TARS/
 
 # ▌INSTALLATION PROTOCOL
 
-## 1. Clone the System
+## 1. Clone Repo
 
 ```bash
 git clone https://github.com/OneWay-Studios/TARSAI-OneWayStudios.git
@@ -73,7 +73,7 @@ cd TARSAI-OneWayStudios
 
 ---
 
-## 2. Install Tactical Dependencies
+## 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -81,7 +81,7 @@ pip install -r requirements.txt
 
 ---
 
-## 3. Configure Security Credentials
+## 3. Configure API key
 
 Create a `.env` file in the root directory:
 
@@ -101,24 +101,6 @@ If successful, TARS will begin voice-enabled operation.
 
 ---
 
-# ▌WEB INTERFACE
-
-The download and deployment portal is located in:
-
-```
-TarsWebsite/
-```
-
-To launch locally:
-
-```bash
-cd TarsWebsite
-start index.html
-```
-
-Or deploy to any static host (GitHub Pages, Netlify, etc).
-
----
 
 # ▌VOICE ENGINE FILES
 
@@ -151,15 +133,7 @@ Supported Platforms:
 
 ---
 
-# ▌TACTICAL ROADMAP
 
-- [ ] Memory persistence module
-- [ ] Humor modulation control
-- [ ] Robotics GPIO integration
-- [ ] Vision processing expansion
-- [ ] Offline LLM fallback mode
-
----
 
 # ▌MISSION STATEMENT
 
