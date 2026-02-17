@@ -1,7 +1,5 @@
 # TARS | Tactical Adaptive Robotic System
 ### USMC Block II Upgrade — VERSION: v1.0.0
-### TARS is compatible with Windows and Rasberry pi too##
-
 
 TARS is a high-fidelity AI assistant inspired by *Interstellar*, designed for tactical brevity and deadpan humor. It utilizes the **Groq Llama 3.1-8B** model for intelligence and the **Kokoro-ONNX** engine for high-speed, local voice synthesis.
 
