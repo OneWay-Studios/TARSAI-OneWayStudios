@@ -1,0 +1,7 @@
+kokoro-onnx
+groq
+opencv-python
+sounddevice
+speechrecognition
+python-dotenv
+numpy
