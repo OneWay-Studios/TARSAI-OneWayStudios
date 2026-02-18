@@ -120,7 +120,7 @@ They power the Kokoro-ONNX synthesis system.
 Required:
 
 ```
-Python 3.10+
+Python 3.11
 Groq API Key
 Internet Connection
 ```
