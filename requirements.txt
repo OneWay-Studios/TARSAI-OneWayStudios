@@ -5,3 +5,4 @@ sounddevice
 speechrecognition
 python-dotenv
 numpy
+PyAudio

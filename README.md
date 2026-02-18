@@ -31,7 +31,7 @@ Core stack:
 ```
 LLM Engine      → Groq Llama 3.1-8B
 Voice Engine    → Kokoro-ONNX by by thewh1teagle/kokoro-onnx Repo.
-Language        → Python 3.10+
+Language        → Recommended Version of Python is Version 3.1
 Interface       → Terminal
 ```
 
