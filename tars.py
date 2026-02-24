@@ -20,8 +20,9 @@ load_dotenv()
 # ======================
 # GLOBAL STOP FLAG
 # ======================
-GUI_ENABLED = False
+GUI_ENABLED = True
 stop_flag = False
+is_speaking = False  # Global flag to track whether TARS is speaking
 tts_queue = queue.Queue()
 tts_thread_running = False
 
@@ -30,6 +31,11 @@ tts_thread_running = False
 # ======================
 import os
 import contextlib
+
+current_eye_y = 60  # Default starting size when not speaking
+target_eye_y = 60   # Target size for the eyes
+transition_speed = 0.1  # Speed of smooth transition
+
 
 @contextlib.contextmanager
 def suppress_stderr():
@@ -162,6 +168,40 @@ def tars_startup_screen():
     for line in logo.splitlines():
         print(line)
         time.sleep(0.05)
+
+def update_eye_size():
+    global current_eye_y, target_eye_y
+    # Smoothly transition between current size and target size
+    current_eye_y += (target_eye_y - current_eye_y) * transition_speed
+
+def create_face_image():
+    # Set the background to black (all zeros)
+    face = np.zeros((400, 500, 3), dtype=np.uint8)  # Black background
+    
+    # Make the eyes bigger and wider
+    eye_axis_x = 30  # Horizontal radius (makes eyes wide)
+    
+    # Update the vertical axis for smooth animation (based on speaking)
+    eye_axis_y = current_eye_y  # Smooth transition for vertical axis
+    
+    # Position of the eyes
+    eye_position_left = (120, 150)
+    eye_position_right = (380, 150)
+    
+    # Draw the eyes as ellipses (wider at the top)
+    cv2.ellipse(face, eye_position_left, (eye_axis_x, int(eye_axis_y)), 0, 0, 360, (255, 255, 255), -1)  # Left eye (white)
+    cv2.ellipse(face, eye_position_right, (eye_axis_x, int(eye_axis_y)), 0, 0, 360, (255, 255, 255), -1)  # Right eye (white)
+    
+    return face
+
+
+# Function to display the eyes continuously
+def display_eyes():
+    while not stop_flag:
+        update_eye_size()  # Update eye size based on smooth transition
+        face = create_face_image()
+        cv2.imshow("TARS Eyes", face)  # Show the face with eyes
+        cv2.waitKey(1)  # Refresh the window (non-blocking)
     
 
 def trigger_self_destruct():
@@ -217,7 +257,8 @@ def tts_worker():
     while tts_thread_running:
         try:
             samples = tts_queue.get(timeout=1)
-            sd.play(samples, 24000, blocking=True)
+            # Play the samples asynchronously (non-blocking)
+            sd.play(samples, 24000)
             tts_queue.task_done()
         except queue.Empty:
             continue
@@ -231,11 +272,18 @@ threading.Thread(target=tts_worker, daemon=True).start()
 # ---------------------
 def speak(text, speed=1.3):
     """Moderately fast TTS using queue system."""
+    global is_speaking  # Access the global speaking flag
+    global target_eye_y  # Access the target_eye_y for smooth animation
+    
     if not text:
         return
 
     clean_text = text.replace("*", "").replace("#", "").strip()
     print(f"TARS: {clean_text}")
+
+    # Mark that TARS is speaking
+    is_speaking = True
+    target_eye_y = 20  # Shrink eyes immediately when speaking starts
 
     # Split text only if very long
     chunks = (
@@ -250,15 +298,23 @@ def speak(text, speed=1.3):
 
     for chunk in chunks:
         try:
-            # Generate TTS samples
+            # Generate TTS samples asynchronously (immediately, not waiting for eye shrinking)
             samples, _ = kokoro.create(chunk, voice="am_onyx", speed=speed, lang="en-us")
-            tts_queue.put(samples)  # Queue for playback
+            tts_queue.put(samples)  # Queue for playback immediately
         except Exception as e:
             print(f"TTS Error: {e}")
+
+    # After triggering TTS, we can asynchronously handle eye animation
+    threading.Thread(target=update_eye_size, daemon=True).start()  # Update eyes smoothly in the background
 
     global last_sound_time
     last_sound_time = time.time()
 
+    # Return eyes to normal size after speaking finishes (do not block TTS)
+    target_eye_y = 60  # Eyes return to normal size
+
+    # Mark that TARS has finished speaking
+    is_speaking = False
 
 
 # ======================
@@ -363,6 +419,12 @@ threading.Thread(target=auto_comment_loop, daemon=True).start()
 threading.Thread(target=auto_day_comment_loop, daemon=True).start()
 
 # ======================
+# GUI: Display Eyes in a separate thread
+# ======================
+if GUI_ENABLED:
+    threading.Thread(target=display_eyes, daemon=True).start()  # Start the eyes display thread
+
+# ======================
 # MAIN LOOP
 # ======================
 
@@ -416,7 +478,6 @@ try:
                 if any(w in clean_input for w in ["self destruct","self-destruct", "initiate self destruct", "blow up"]):
                     trigger_self_destruct()
                     continue
-
 
                 # ======================
                 # Day question check
@@ -478,10 +539,14 @@ try:
         except Exception as e:
             print(f"\nSystem Error: {e}")
 
+        # Allow OpenCV window to update (key press event handling)
+        if GUI_ENABLED:
+            cv2.waitKey(1)  # Let OpenCV process events and update the GUI window
+
 except KeyboardInterrupt:
     print("\nTARS: Powering down...")
     stop_flag = True
     camera.release()
-if GUI_ENABLED:
-    cv2.destroyAllWindows()
 
+if GUI_ENABLED:
+    cv2.destroyAllWindows()  # Close the OpenCV windows properly
