@@ -273,16 +273,17 @@ def trigger_self_destruct():
 
     # --- NON-BLOCKING BEEP ---
     def play_alarm_beep(duration=0.2, freq=880):
-        """Play a short beep immediately without waiting for TTS."""
-        def beep_thread():
-            fs = 24000
-            t = np.linspace(0, duration, int(fs * duration), False)
-            tone = np.sin(freq * t * 2 * np.pi)
-            fade = int(fs * 0.02)
-            tone[:fade] *= np.linspace(0, 1, fade)
-            tone[-fade:] *= np.linspace(1, 0, fade)
-            sd.play(tone * 0.5, fs, blocking=True)
-        threading.Thread(target=beep_thread, daemon=True).start()
+        """Queue a beep to play asynchronously on top of TTS."""
+        fs = 24000
+        t = np.linspace(0, duration, int(fs * duration), False)
+        tone = np.sin(freq * t * 2 * np.pi)
+        fade = int(fs * 0.02)
+        tone[:fade] *= np.linspace(0, 1, fade)
+        tone[-fade:] *= np.linspace(1, 0, fade)
+        samples = (tone * 0.5).astype(np.float32)
+
+        # Put beep in the global sound queue
+        sound_queue.put(samples)
 
     # --- COUNTDOWN LOOP ---
     while countdown > 0 and not stop_flag:
@@ -324,7 +325,7 @@ def trigger_self_destruct():
     # --- FINAL CANCEL SPEECH ---
     speak("Self destruct cancelled. Humor setting was clearly too high.")
     self_destruct_active = False
-    
+
 # ======================
 # TEXT TO SPEECH
 # ======================
