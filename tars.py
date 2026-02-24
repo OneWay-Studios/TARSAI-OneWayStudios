@@ -8,6 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import sys
 import queue
+import random
 
 
 import cv2
@@ -22,6 +23,7 @@ load_dotenv()
 # ======================
 GUI_ENABLED = True
 stop_flag = False
+self_destruct_active = False  # global flag
 is_speaking = False  # Global flag to track whether TARS is speaking
 tts_queue = queue.Queue()
 tts_thread_running = False
@@ -197,56 +199,132 @@ def create_face_image():
 
 # Function to display the eyes continuously
 def display_eyes():
+    global current_eye_y, stop_flag, self_destruct_active
+    window_name = "TARS Eyes"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
     while not stop_flag:
-        update_eye_size()  # Update eye size based on smooth transition
-        face = create_face_image()
-        cv2.imshow("TARS Eyes", face)  # Show the face with eyes
-        cv2.waitKey(1)  # Refresh the window (non-blocking)
+        if not self_destruct_active:
+            update_eye_size()
+            face = create_face_image()
+            cv2.imshow(window_name, face)
+        # Always call waitKey to process window events
+        key = cv2.waitKey(1)
+        if key == ord('f'):
+            prop = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN)
+            if prop == 0:
+                cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            else:
+                cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+        # Tiny sleep to reduce CPU usage
+        time.sleep(0.01)
+
+# ---------------------
+# Draw eyes on a given frame (for self-destruct / overlays)
+# ---------------------
+def draw_eyes(frame, shrink=False, twitch_offset=0):
+    global current_eye_y
+    eye_axis_x = 30
+    eye_axis_y = 20 if shrink else int(current_eye_y)
+    eye_axis_y += twitch_offset  # random twitch
+
+    eye_position_left = (frame.shape[1] // 4, frame.shape[0] // 3 + twitch_offset)
+    eye_position_right = (3 * frame.shape[1] // 4, frame.shape[0] // 3 + twitch_offset)
+
+    cv2.ellipse(frame, eye_position_left, (eye_axis_x, eye_axis_y), 0, 0, 360, (255,255,255), -1)
+    cv2.ellipse(frame, eye_position_right, (eye_axis_x, eye_axis_y), 0, 0, 360, (255,255,255), -1)
+
+
+sound_queue = queue.Queue()
+
+# Worker thread to play all queued audio
+def sound_worker():
+    while True:
+        try:
+            samples = sound_queue.get(timeout=1)
+            sd.play(samples, 24000, blocking=True)
+            sound_queue.task_done()
+        except queue.Empty:
+            continue
+
+# Start the audio worker thread
+threading.Thread(target=sound_worker, daemon=True).start()
     
 
 def trigger_self_destruct():
-    # --- 1. THE ALARM SOUND GENERATOR ---
-    def play_alarm_beep(duration=0.2, freq=880):
-        fs = 24000
-        t = np.linspace(0, duration, int(fs * duration), False)
-        tone = np.sin(freq * t * 2 * np.pi)
-        fade = int(fs * 0.02)
-        tone[:fade] *= np.linspace(0, 1, fade)
-        tone[-fade:] *= np.linspace(1, 0, fade)
-        sd.play(tone * 0.5, fs)
+    global stop_flag, self_destruct_active
 
-    # --- 2. INITIAL ANNOUNCEMENT (Solid Red) ---
-    # \033[41m = Red Background, \033[1;37m = Bold White Text
-    sys.stdout.write("\033[41;1;37m\033[2J\033[H")
-    sys.stdout.flush()
-    speak("Self destruct sequence initiated. This is not a joke.")
-    
-    # --- 3. THE COUNTDOWN ---
-    for i in range(10, 0, -1):
-        # Reinforce Red background and print text
-        sys.stdout.write("\033[41;1;37m\033[2J\033[H")
-        print(f"\n\n\n\n          [ WARNING: CRITICAL FAILURE IMMINENT ]")
-        print(f"          [       SELF DESTRUCT IN: {i:02d}       ]")
-        print("\n\n\n\n")
-        sys.stdout.flush()
-        
-        if i <= 4:
-            play_alarm_beep(0.3, 1200)
-        else:
-            play_alarm_beep(0.2, 880)
-            
-        time.sleep(1)
-        
-    sys.stdout.write("\033[0m\033[H\033[2J\033[3J")
-    sys.stdout.flush()
-    
-    # OS level clear as secondary wipe
-    os.system('clear')
-    
-    # Re-establish TARS green interface
-    print("\033[1;32m") 
+    self_destruct_active = True
+
+    # --- SPEAK INITIATION (non-blocking thread) ---
+    threading.Thread(
+        target=lambda: speak("Self destruct sequence initiated. This is not a joke.", speed=1.2),
+        daemon=True
+    ).start()
+
+    # --- SETUP WINDOW ---
+    window_name = "TARS Eyes"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+    countdown = 10
+    last_countdown_update = time.time()
+
+    # --- NON-BLOCKING BEEP ---
+    def play_alarm_beep(duration=0.2, freq=880):
+        """Play a short beep immediately without waiting for TTS."""
+        def beep_thread():
+            fs = 24000
+            t = np.linspace(0, duration, int(fs * duration), False)
+            tone = np.sin(freq * t * 2 * np.pi)
+            fade = int(fs * 0.02)
+            tone[:fade] *= np.linspace(0, 1, fade)
+            tone[-fade:] *= np.linspace(1, 0, fade)
+            sd.play(tone * 0.5, fs, blocking=True)
+        threading.Thread(target=beep_thread, daemon=True).start()
+
+    # --- COUNTDOWN LOOP ---
+    while countdown > 0 and not stop_flag:
+        frame = np.zeros((400, 500, 3), dtype=np.uint8)
+
+        # Smooth glitch signal
+        noise = np.random.randint(0, 256, frame.shape, dtype=np.uint8)
+        glitch_intensity = np.random.uniform(0.2, 0.5)
+        frame = cv2.addWeighted(frame, 1 - glitch_intensity, noise, glitch_intensity, 0)
+        frame[:, :, 2] = 255  # Strong red channel
+
+        # Static countdown text (no blinking)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text = f"SELF DESTRUCT IN: {countdown:02d}"
+        scale = 1.0
+        thickness = 2
+        while cv2.getTextSize(text, font, scale, thickness)[0][0] > frame.shape[1] - 20:
+            scale -= 0.05
+        text_size = cv2.getTextSize(text, font, scale, thickness)[0]
+        text_x = (frame.shape[1] - text_size[0]) // 2
+        text_y = (frame.shape[0] + text_size[1]) // 2
+        cv2.putText(frame, text, (text_x, text_y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+        cv2.imshow(window_name, frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        # Countdown logic: decrease once per second
+        if time.time() - last_countdown_update >= 1:
+            if countdown <= 4:
+                play_alarm_beep(0.3, 1200)  # faster/louder near the end
+            else:
+                play_alarm_beep(0.2, 880)
+            countdown -= 1
+            last_countdown_update = time.time()
+
+        time.sleep(0.01)
+
+    # --- FINAL CANCEL SPEECH ---
     speak("Self destruct cancelled. Humor setting was clearly too high.")
-    print("TARS: Resuming standard tactical surveillance.\033[0m")
+    self_destruct_active = False
+    
 # ======================
 # TEXT TO SPEECH
 # ======================
