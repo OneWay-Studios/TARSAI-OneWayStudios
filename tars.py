@@ -8,7 +8,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 import sys
 import queue
-import random
 
 
 import cv2
