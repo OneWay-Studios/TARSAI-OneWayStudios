@@ -2,14 +2,14 @@ import speech_recognition as sr
 import time
 import numpy as np
 import sounddevice as sd
-from kokoro_onnx import Kokoro
 from groq import Groq
 from datetime import datetime
 from dotenv import load_dotenv
 import sys
 import queue
-
-
+import re
+import subprocess
+import contextlib
 import cv2
 import threading
 import os
@@ -20,23 +20,18 @@ load_dotenv()
 # ======================
 # GLOBAL STOP FLAG
 # ======================
-GUI_ENABLED = True
+GUI_ENABLED = False
 stop_flag = False
 self_destruct_active = False  # global flag
 is_speaking = False  # Global flag to track whether TARS is speaking
 tts_queue = queue.Queue()
 tts_thread_running = False
+silence_announced = False
 
-# ======================
-# INITIALIZE VOICE
-# ======================
-import os
-import contextlib
 
-current_eye_y = 60  # Default starting size when not speaking
-target_eye_y = 60   # Target size for the eyes
-transition_speed = 0.1  # Speed of smooth transition
 
+sd.default.device = None
+mic = sr.Microphone()
 
 @contextlib.contextmanager
 def suppress_stderr():
@@ -45,32 +40,6 @@ def suppress_stderr():
         with contextlib.redirect_stderr(fnull):
             yield
 
-try:
-    import onnxruntime as ort
-    
-    # 1. Force the engine to ignore everything except the CPU
-    sess_options = ort.SessionOptions()
-    sess_options.intra_op_num_threads = 2
-    sess_options.add_session_config_entry("session.intra_op.allow_spinning", "0")
-
-    os.system('clear')
-    
-    # 2. Use the suppressor only during the initialization phase
-    with suppress_stderr():
-        kokoro = Kokoro("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")
-        
-        # Manually lock the session to CPU
-        kokoro.session = ort.InferenceSession(
-            "kokoro-v1.0.int8.onnx",
-            sess_options=sess_options,
-            providers=["CPUExecutionProvider"]
-        )
-    print("Warming up voice engine...")
-    _ = kokoro.create("Initialize.", voice="am_onyx", speed=1.1, lang="en-us")
-    
-    print("sVoice engine locked to CPU. Discovery warnings suppressed.")
-except Exception as e:
-    print(f"Kokoro Init Error: {e}")
 
 TestMode = False
 
@@ -121,7 +90,7 @@ BEHAVIOR:
 - Simple questions → short answers.
 - Status questions → calm, professional.
 - Emotional input → cold facts or mild sarcasm.
-- Humor frequency: approximately 1 in 7 interactions.
+- Humor frequency: approximately 1 in 3 interactions.
 """
 
 # ======================
@@ -130,7 +99,8 @@ BEHAVIOR:
 recognizer = sr.Recognizer()
 recognizer.dynamic_energy_threshold = True
 recognizer.pause_threshold = 0.5
-mic = sr.Microphone()
+with suppress_stderr():
+    mic = sr.Microphone(device_index=2)
 
 # ======================
 # HARD RESPONSE LIMITER
@@ -144,7 +114,6 @@ def enforce_brevity(text, max_words=80):
         return " ".join(words[:max_words])
     return text
 
-import sys
 
 def tars_startup_screen():
     logo = r"""
@@ -156,7 +125,7 @@ def tars_startup_screen():
       |   |  |   _   ||   |  | | _____| |
       |___|  |__| |__||___|  |_||_______|
     ---------------------------------------------------------
-             TACTICAL ADAPTIVE ROBOTIC SYSTEM (TARS)
+             TACTICAL ADAPTIVE ROBOTIC SYSTEM (TARS) FROM THE MOVIE INTERSTELLAR
              U.S. MARINE CORPS - BLOCK II UPGRADE
              ENCRYPTION: AES-256 ACTIVE
              VERSION: 1.0.0
@@ -170,69 +139,8 @@ def tars_startup_screen():
         print(line)
         time.sleep(0.05)
 
-def update_eye_size():
-    global current_eye_y, target_eye_y
-    # Smoothly transition between current size and target size
-    current_eye_y += (target_eye_y - current_eye_y) * transition_speed
-
-def create_face_image():
-    # Set the background to black (all zeros)
-    face = np.zeros((400, 500, 3), dtype=np.uint8)  # Black background
-    
-    # Make the eyes bigger and wider
-    eye_axis_x = 30  # Horizontal radius (makes eyes wide)
-    
-    # Update the vertical axis for smooth animation (based on speaking)
-    eye_axis_y = current_eye_y  # Smooth transition for vertical axis
-    
-    # Position of the eyes
-    eye_position_left = (120, 150)
-    eye_position_right = (380, 150)
-    
-    # Draw the eyes as ellipses (wider at the top)
-    cv2.ellipse(face, eye_position_left, (eye_axis_x, int(eye_axis_y)), 0, 0, 360, (255, 255, 255), -1)  # Left eye (white)
-    cv2.ellipse(face, eye_position_right, (eye_axis_x, int(eye_axis_y)), 0, 0, 360, (255, 255, 255), -1)  # Right eye (white)
-    
-    return face
 
 
-# Function to display the eyes continuously
-def display_eyes():
-    global current_eye_y, stop_flag, self_destruct_active
-    window_name = "TARS Eyes"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
-    while not stop_flag:
-        if not self_destruct_active:
-            update_eye_size()
-            face = create_face_image()
-            cv2.imshow(window_name, face)
-        # Always call waitKey to process window events
-        key = cv2.waitKey(1)
-        if key == ord('f'):
-            prop = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN)
-            if prop == 0:
-                cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-            else:
-                cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
-        # Tiny sleep to reduce CPU usage
-        time.sleep(0.01)
-
-# ---------------------
-# Draw eyes on a given frame (for self-destruct / overlays)
-# ---------------------
-def draw_eyes(frame, shrink=False, twitch_offset=0):
-    global current_eye_y
-    eye_axis_x = 30
-    eye_axis_y = 20 if shrink else int(current_eye_y)
-    eye_axis_y += twitch_offset  # random twitch
-
-    eye_position_left = (frame.shape[1] // 4, frame.shape[0] // 3 + twitch_offset)
-    eye_position_right = (3 * frame.shape[1] // 4, frame.shape[0] // 3 + twitch_offset)
-
-    cv2.ellipse(frame, eye_position_left, (eye_axis_x, eye_axis_y), 0, 0, 360, (255,255,255), -1)
-    cv2.ellipse(frame, eye_position_right, (eye_axis_x, eye_axis_y), 0, 0, 360, (255,255,255), -1)
 
 
 sound_queue = queue.Queue()
@@ -256,23 +164,17 @@ def trigger_self_destruct():
 
     self_destruct_active = True
 
-    # --- SPEAK INITIATION (non-blocking thread) ---
+    # 1. Start the warning speech in a background thread
     threading.Thread(
         target=lambda: speak("Self destruct sequence initiated. This is not a joke.", speed=1.2),
         daemon=True
     ).start()
 
-    # --- SETUP WINDOW ---
-    window_name = "TARS Eyes"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
     countdown = 10
     last_countdown_update = time.time()
 
-    # --- NON-BLOCKING BEEP ---
+    # Audio beep logic (Keep this as is, it's non-GUI)
     def play_alarm_beep(duration=0.2, freq=880):
-        """Queue a beep to play asynchronously on top of TTS."""
         fs = 24000
         t = np.linspace(0, duration, int(fs * duration), False)
         tone = np.sin(freq * t * 2 * np.pi)
@@ -280,119 +182,92 @@ def trigger_self_destruct():
         tone[:fade] *= np.linspace(0, 1, fade)
         tone[-fade:] *= np.linspace(1, 0, fade)
         samples = (tone * 0.5).astype(np.float32)
-
-        # Put beep in the global sound queue
         sound_queue.put(samples)
 
-    # --- COUNTDOWN LOOP ---
+    # 2. Console-only countdown loop
+    print("\n\033[1;31m[WARNING] SYSTEM CRITICAL: OVERRIDE DETECTED\033[0m")
+    
     while countdown > 0 and not stop_flag:
-        frame = np.zeros((400, 500, 3), dtype=np.uint8)
-
-        # Smooth glitch signal
-        noise = np.random.randint(0, 256, frame.shape, dtype=np.uint8)
-        glitch_intensity = np.random.uniform(0.2, 0.5)
-        frame = cv2.addWeighted(frame, 1 - glitch_intensity, noise, glitch_intensity, 0)
-        frame[:, :, 2] = 255  # Strong red channel
-
-        # Static countdown text (no blinking)
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        text = f"SELF DESTRUCT IN: {countdown:02d}"
-        scale = 1.0
-        thickness = 2
-        while cv2.getTextSize(text, font, scale, thickness)[0][0] > frame.shape[1] - 20:
-            scale -= 0.05
-        text_size = cv2.getTextSize(text, font, scale, thickness)[0]
-        text_x = (frame.shape[1] - text_size[0]) // 2
-        text_y = (frame.shape[0] + text_size[1]) // 2
-        cv2.putText(frame, text, (text_x, text_y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
-
-        cv2.imshow(window_name, frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-        # Countdown logic: decrease once per second
+        # Check for 1-second ticks
         if time.time() - last_countdown_update >= 1:
+            # Print countdown in Red (\033[1;31m)
+            # The \r at the end ensures it updates on the same line
+            print(f"\033[1;31mDETONATION IN: {countdown:02d} SECONDS\033[0m", end="\r")
+            
+            # Sound the alarm
             if countdown <= 4:
-                play_alarm_beep(0.3, 1200)  # faster/louder near the end
+                play_alarm_beep(0.3, 1200)  # Faste /higher pitch for urgency
             else:
                 play_alarm_beep(0.2, 880)
+            
             countdown -= 1
             last_countdown_update = time.time()
 
-        time.sleep(0.01)
+        time.sleep(0.05) # Light sleep to save CPU
 
-    # --- FINAL CANCEL SPEECH ---
+    # 3. Completion
+    print("\033[1;32m")
+    print("\n\033[1;32m[SYSTEM] SELF-DESTRUCT ABORTED\033[0m")
+    print("\033[1;31m")
     speak("Self destruct cancelled. Humor setting was clearly too high.")
+    print("\033[1;32m")
     self_destruct_active = False
 
 # ======================
 # TEXT TO SPEECH
 # ======================
-def tts_worker():
-    """Continuously plays queued TTS chunks."""
-    global tts_thread_running
+def tts_worker_festival():
+    """Worker thread to play queued Festival TTS sentences sequentially."""
+    global tts_thread_running, is_speaking
     tts_thread_running = True
     while tts_thread_running:
         try:
-            samples = tts_queue.get(timeout=1)
-            # Play the samples asynchronously (non-blocking)
-            sd.play(samples, 24000)
+            sentence, speed_val = tts_queue.get(timeout=1)
+            is_speaking = True
+
+            # Control speech speed
+            duration = 1 / speed_val if speed_val > 0 else 1
+            safe_sentence = sentence.replace('"', '\\"')
+
+            # Build Festival command
+            scheme_cmd = f'(voice_kal_diphone) (Parameter.set "Duration_Stretch" {duration}) (SayText "{safe_sentence}")'
+
+            # Run Festival using subprocess (more reliable)
+            subprocess.run(
+                ["festival", "--pipe"],
+                input=scheme_cmd.encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
             tts_queue.task_done()
+            is_speaking = False
         except queue.Empty:
             continue
 
-# Start the TTS worker thread once
-threading.Thread(target=tts_worker, daemon=True).start()
+# Start the worker thread once
+threading.Thread(target=tts_worker_festival, daemon=True).start()
 
 
 # ---------------------
 # Speak function
 # ---------------------
-def speak(text, speed=1.3):
-    """Moderately fast TTS using queue system."""
-    global is_speaking  # Access the global speaking flag
-    global target_eye_y  # Access the target_eye_y for smooth animation
-    
+def speak(text, speed=1.0):
+    global last_sound_time
     if not text:
         return
 
     clean_text = text.replace("*", "").replace("#", "").strip()
     print(f"TARS: {clean_text}")
 
-    # Mark that TARS is speaking
-    is_speaking = True
-    target_eye_y = 20  # Shrink eyes immediately when speaking starts
+    sentences = re.split(r'(?<=[.!?]) +', clean_text)
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) < 2:
+            continue
+        tts_queue.put((sentence, speed))
 
-    # Split text only if very long
-    chunks = (
-        [clean_text]
-        if len(clean_text.split()) <= 100
-        else [
-            s.strip()
-            for s in clean_text.replace("!", ".").replace("?", ".").split(".")
-            if len(s.strip()) > 2
-        ]
-    )
-
-    for chunk in chunks:
-        try:
-            # Generate TTS samples asynchronously (immediately, not waiting for eye shrinking)
-            samples, _ = kokoro.create(chunk, voice="am_onyx", speed=speed, lang="en-us")
-            tts_queue.put(samples)  # Queue for playback immediately
-        except Exception as e:
-            print(f"TTS Error: {e}")
-
-    # After triggering TTS, we can asynchronously handle eye animation
-    threading.Thread(target=update_eye_size, daemon=True).start()  # Update eyes smoothly in the background
-
-    global last_sound_time
     last_sound_time = time.time()
-
-    # Return eyes to normal size after speaking finishes (do not block TTS)
-    target_eye_y = 60  # Eyes return to normal size
-
-    # Mark that TARS has finished speaking
-    is_speaking = False
 
 
 # ======================
@@ -448,11 +323,17 @@ def vision_loop():
 # ======================
 SILENCE_THRESHOLD = 30
 def silence_check():
-    global last_sound_time, stop_flag, active_conversation
+    global last_sound_time, stop_flag, active_conversation, silence_announced
+
     while not stop_flag:
-        if not active_conversation and (time.time() - last_sound_time > SILENCE_THRESHOLD):
-            speak("All quiet here.")
-            last_sound_time = time.time()
+        if not active_conversation:
+            if (time.time() - last_sound_time > SILENCE_THRESHOLD) and not silence_announced:
+                speak("All quiet here.")
+                silence_announced = True
+        else:
+            # Reset when user interacts again
+            silence_announced = False
+
         time.sleep(1)
 
 # ======================
@@ -496,11 +377,6 @@ threading.Thread(target=silence_check, daemon=True).start()
 threading.Thread(target=auto_comment_loop, daemon=True).start()
 threading.Thread(target=auto_day_comment_loop, daemon=True).start()
 
-# ======================
-# GUI: Display Eyes in a separate thread
-# ======================
-if GUI_ENABLED:
-    threading.Thread(target=display_eyes, daemon=True).start()  # Start the eyes display thread
 
 # ======================
 # MAIN LOOP
@@ -617,14 +493,13 @@ try:
         except Exception as e:
             print(f"\nSystem Error: {e}")
 
-        # Allow OpenCV window to update (key press event handling)
-        if GUI_ENABLED:
-            cv2.waitKey(1)  # Let OpenCV process events and update the GUI window
 
 except KeyboardInterrupt:
-    print("\nTARS: Powering down...")
+    print("\n\033[1;33mTARS: Powering down....\033[0m")
     stop_flag = True
-    camera.release()
+    if camera.isOpened():
+        camera.release()
+    sys.exit(0)
 
 if GUI_ENABLED:
     cv2.destroyAllWindows()  # Close the OpenCV windows properly

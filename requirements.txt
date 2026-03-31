@@ -1,9 +1,9 @@
-kokoro-onnx
 groq
-opencv-python
+SpeechRecognition
+PyAudio
 sounddevice
-speechrecognition
+opencv-python
 python-dotenv
 numpy
-onnxruntime
-PyAudio
+setuptools
+wheel
