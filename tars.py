@@ -17,13 +17,10 @@ import os
 load_dotenv()
 
 
-# ======================
-# GLOBAL STOP FLAG
-# ======================
 GUI_ENABLED = False
 stop_flag = False
-self_destruct_active = False  # global flag
-is_speaking = False  # Global flag to track whether TARS is speaking
+self_destruct_active = False 
+is_speaking = False  #is speaking?
 tts_queue = queue.Queue()
 tts_thread_running = False
 silence_announced = False
@@ -43,13 +40,12 @@ def suppress_stderr():
 
 TestMode = False
 
-# ======================
-# GROQ API KEY (SECURE)
-# ======================
+# GROQ API KEY
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    print("\033[1;31m") # Red text
+    print("\033[1;31m")
     print("CRITICAL ERROR: GROQ_API_KEY not found.")
     print("Ensure you have a .env file with GROQ_API_KEY=your_key_here")
     print("\033[0m")
@@ -57,16 +53,10 @@ if not GROQ_API_KEY:
 
 client = Groq(api_key=GROQ_API_KEY)
 
-# ======================
-# CONVERSATION STATE
-# ======================
 active_conversation = False
 last_interaction_time = 0
 CONVERSATION_TIMEOUT = 60
 
-# ======================
-# TARS SYSTEM PROMPT
-# ======================
 TARS_INSTRUCTIONS = """
 You are TARS, a United States Marine Corps tactical robot.
 
@@ -93,18 +83,18 @@ BEHAVIOR:
 - Humor frequency: approximately 1 in 3 interactions.
 """
 
-# ======================
-# SPEECH RECOGNITION
-# ======================
+
+# Speech recognition 
+
 recognizer = sr.Recognizer()
 recognizer.dynamic_energy_threshold = True
 recognizer.pause_threshold = 0.5
 with suppress_stderr():
     mic = sr.Microphone(device_index=2)
 
-# ======================
-# HARD RESPONSE LIMITER
-# ======================
+
+# Reponse limiter to save GROQ tokens
+
 def enforce_brevity(text, max_words=80):
     """
     Flexible max words: 40 for tactical/visual queries, 80 for general conversation/outside commentary.
@@ -132,9 +122,8 @@ def tars_startup_screen():
     ---------------------------------------------------------
     """
     os.system('clear')
-    print("\033[1;32m") # Set to Green
+    print("\033[1;32m")
     
-    # Typewriter effect for the logo
     for line in logo.splitlines():
         print(line)
         time.sleep(0.05)
@@ -145,7 +134,6 @@ def tars_startup_screen():
 
 sound_queue = queue.Queue()
 
-# Worker thread to play all queued audio
 def sound_worker():
     while True:
         try:
@@ -155,7 +143,6 @@ def sound_worker():
         except queue.Empty:
             continue
 
-# Start the audio worker thread
 threading.Thread(target=sound_worker, daemon=True).start()
     
 
@@ -164,7 +151,6 @@ def trigger_self_destruct():
 
     self_destruct_active = True
 
-    # 1. Start the warning speech in a background thread
     threading.Thread(
         target=lambda: speak("Self destruct sequence initiated. This is not a joke.", speed=1.2),
         daemon=True
@@ -173,7 +159,6 @@ def trigger_self_destruct():
     countdown = 10
     last_countdown_update = time.time()
 
-    # Audio beep logic (Keep this as is, it's non-GUI)
     def play_alarm_beep(duration=0.2, freq=880):
         fs = 24000
         t = np.linspace(0, duration, int(fs * duration), False)
@@ -184,28 +169,22 @@ def trigger_self_destruct():
         samples = (tone * 0.5).astype(np.float32)
         sound_queue.put(samples)
 
-    # 2. Console-only countdown loop
     print("\n\033[1;31m[WARNING] SYSTEM CRITICAL: OVERRIDE DETECTED\033[0m")
     
     while countdown > 0 and not stop_flag:
-        # Check for 1-second ticks
         if time.time() - last_countdown_update >= 1:
-            # Print countdown in Red (\033[1;31m)
-            # The \r at the end ensures it updates on the same line
             print(f"\033[1;31mDETONATION IN: {countdown:02d} SECONDS\033[0m", end="\r")
             
-            # Sound the alarm
             if countdown <= 4:
-                play_alarm_beep(0.3, 1200)  # Faste /higher pitch for urgency
+                play_alarm_beep(0.3, 1200) 
             else:
                 play_alarm_beep(0.2, 880)
             
             countdown -= 1
             last_countdown_update = time.time()
 
-        time.sleep(0.05) # Light sleep to save CPU
+        time.sleep(0.05)
 
-    # 3. Completion
     print("\033[1;32m")
     print("\n\033[1;32m[SYSTEM] SELF-DESTRUCT ABORTED\033[0m")
     print("\033[1;31m")
@@ -213,9 +192,9 @@ def trigger_self_destruct():
     print("\033[1;32m")
     self_destruct_active = False
 
-# ======================
+
 # TEXT TO SPEECH
-# ======================
+
 def tts_worker_festival():
     """Worker thread to play queued Festival TTS sentences sequentially."""
     global tts_thread_running, is_speaking
@@ -245,13 +224,12 @@ def tts_worker_festival():
         except queue.Empty:
             continue
 
-# Start the worker thread once
+
 threading.Thread(target=tts_worker_festival, daemon=True).start()
 
 
-# ---------------------
 # Speak function
-# ---------------------
+
 def speak(text, speed=1.0):
     global last_sound_time
     if not text:
@@ -270,19 +248,19 @@ def speak(text, speed=1.0):
     last_sound_time = time.time()
 
 
-# ======================
-# >>> CAMERA <<<
-# ======================
+
+# CAMERA
+
 camera = cv2.VideoCapture(0)
 
-# Global variables for vision
+
 latest_objects = []
 last_sound_time = time.time()
-environment_type = "indoor"  # Default, will update automatically
+environment_type = "indoor"
 
-# ======================
+
 # DAY / DUSK / NIGHT DETECTION
-# ======================
+
 latest_frame = None
 last_day_comment_time = 0
 
@@ -296,9 +274,9 @@ def get_day_state(frame):
     else:
         return "night"
 
-# ======================
-# CONTINUOUS VISION LOOP
-# ======================
+
+# VISION LOOP
+
 def vision_loop():
     global stop_flag, latest_frame, environment_type
     while not stop_flag:
@@ -306,21 +284,17 @@ def vision_loop():
         if not ret:
             time.sleep(1)
             continue
-
-        # Use a tiny size (160x120) to save CPU cycles
         latest_frame = cv2.resize(frame, (160, 120))
         gray = cv2.cvtColor(latest_frame, cv2.COLOR_BGR2GRAY)
         brightness = np.mean(gray)
         environment_type = "outdoor" if brightness > 150 else "indoor"
 
-        # IMPORTANT: Sleep for 1 second. 
-        # You don't need to check brightness 10 times a second.
         time.sleep(1.0)
 
 
-# ======================
+
 # SILENCE MONITORING
-# ======================
+
 SILENCE_THRESHOLD = 30
 def silence_check():
     global last_sound_time, stop_flag, active_conversation, silence_announced
@@ -331,14 +305,11 @@ def silence_check():
                 speak("All quiet here.")
                 silence_announced = True
         else:
-            # Reset when user interacts again
             silence_announced = False
 
         time.sleep(1)
 
-# ======================
-# AUTO-COMMENT LOOP (silent indoor, only outdoor mood commentary)
-# ======================
+
 auto_spoken_objects = set()
 
 def auto_comment_loop():
@@ -349,11 +320,11 @@ def auto_comment_loop():
             state = get_day_state(latest_frame)
             if state == "night":
                 speak("Visibility is dropping.")
-        time.sleep(10) # Longer delay to be less annoying
+        time.sleep(10) 
 
-# ======================
+
 # AUTO DAY COMMENT LOOP
-# ======================
+
 def auto_day_comment_loop():
     global last_day_comment_time
     while not stop_flag:
@@ -369,18 +340,18 @@ def auto_day_comment_loop():
                 last_day_comment_time = time.time()
         time.sleep(5)
 
-# ======================
+
 # START VISION + SILENCE + AUTO COMMENT THREADS
-# ======================
+
 threading.Thread(target=vision_loop, daemon=True).start()
 threading.Thread(target=silence_check, daemon=True).start()
 threading.Thread(target=auto_comment_loop, daemon=True).start()
 threading.Thread(target=auto_day_comment_loop, daemon=True).start()
 
 
-# ======================
+
 # MAIN LOOP
-# ======================
+
 
 tars_startup_screen()
 
@@ -417,7 +388,7 @@ try:
                     clean_input = clean_input.replace(v, "")
                 clean_input = clean_input.strip()
 
-                # 2. Update status
+                # Update status
                 active_conversation = True
                 last_interaction_time = time.time()
 
@@ -433,9 +404,9 @@ try:
                     trigger_self_destruct()
                     continue
 
-                # ======================
+
                 # Day question check
-                # ======================
+
                 if any(p in clean_input for p in ["good day", "how is the day", "is it a good day"]):
                     if latest_frame is not None:
                         state = get_day_state(latest_frame)
@@ -447,7 +418,7 @@ try:
                             speak("Negative. Poor visibility.")
                     continue
 
-                # Vision trigger
+                # Vision trigger(This doesnt work but I will fix it on the other updates.)
                 vision_phrases = ["what is this", "what am i holding", "identify this"]
                 use_vision = any(p in clean_input for p in vision_phrases)
 
@@ -462,8 +433,6 @@ try:
                         messages = [{"role": "system", "content": dynamic_instructions}]
 
                         if use_vision:
-                            # Inform the LLM that the object detection hardware is offline
-                            # TARS will now respond based on 'sensors' rather than 'seeing' the object
                             messages.append({
                                 "role": "user", 
                                 "content": f"My object recognition system is offline. I can only detect light levels. User asked: {clean_input}"
