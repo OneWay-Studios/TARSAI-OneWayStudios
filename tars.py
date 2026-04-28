@@ -291,26 +291,6 @@ def vision_loop():
 
         time.sleep(1.0)
 
-def camera_gui_loop():
-    global stop_flag, latest_frame
-
-    while not stop_flag:
-        if latest_frame is None:
-            continue
-
-        frame = latest_frame.copy()
-
-        cv2.putText(frame, "TARS ACTIVE", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-        cv2.imshow("TARS CAMERA", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            stop_flag = True
-            break
-
-    cv2.destroyAllWindows()
-
 
 
 # SILENCE MONITORING
@@ -367,9 +347,6 @@ threading.Thread(target=vision_loop, daemon=True).start()
 threading.Thread(target=silence_check, daemon=True).start()
 threading.Thread(target=auto_comment_loop, daemon=True).start()
 threading.Thread(target=auto_day_comment_loop, daemon=True).start()
-
-if GUI_ENABLED:
-    threading.Thread(target=camera_gui_loop, daemon=True).start()
 
 
 
