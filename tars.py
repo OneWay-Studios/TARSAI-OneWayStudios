@@ -464,7 +464,7 @@ try:
 
 
 except KeyboardInterrupt:
-    print("\n\033[1;33mTARS: Powering down....\033[0m")
+    print("\n\033[1;33mTARS: Powering down...\033[0m")
     stop_flag = True
     if camera.isOpened():
         camera.release()
