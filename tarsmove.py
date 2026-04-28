@@ -1,6 +1,8 @@
 #This is a test .py not sure if it will work(can be skipped)
 
-#pip install adafruit-circuitpython-servokit tkinter
+#pip install adafruit-circuitpython-servokit
+#sudo apt-get update
+#sudo apt-get install python3-tk
 
 from adafruit_servokit import ServoKit
 import time
