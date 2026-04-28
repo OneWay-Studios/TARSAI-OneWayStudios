@@ -24,9 +24,6 @@ is_speaking = False  #is speaking?
 tts_queue = queue.Queue()
 tts_thread_running = False
 silence_announced = False
-CAMON = True
-
-cam_process = None
 
 
 
@@ -148,28 +145,6 @@ def sound_worker():
 
 threading.Thread(target=sound_worker, daemon=True).start()
     
-
-
-def start_camera():
-    global cam_process, CAMON
-    if CAMON and cam_process is None:
-        cam_process = subprocess.Popen(
-            ["rpicam-hello", "--vflip"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-
-
-def stop_camera():
-    global cam_process
-    if cam_process is not None:
-        cam_process.terminate()
-        try:
-            cam_process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            cam_process.kill()
-        cam_process = None
-
 
 def trigger_self_destruct():
     global stop_flag, self_destruct_active
@@ -379,7 +354,6 @@ threading.Thread(target=auto_day_comment_loop, daemon=True).start()
 
 
 tars_startup_screen()
-start_camera()
 
 speak("Powering up... Systems functional...")
 
@@ -421,16 +395,6 @@ try:
                 if not clean_input and waking_up:
                     speak("Sir.")
                     continue
-
-                if "camera on" in clean_input:
-                    CAMON = True
-                    start_camera()
-                    speak("Camera online.")
-
-                if "camera off" in clean_input:
-                    CAMON = False
-                    stop_camera()
-                    speak("Camera offline.")
 
                 if any(w in clean_input for w in ["sleep", "standby", "stop"]):
                     speak("Standing by.")
@@ -502,9 +466,6 @@ try:
 except KeyboardInterrupt:
     print("\n\033[1;33mTARS: Powering down...\033[0m")
     stop_flag = True
-
-    stop_camera()
-
     if camera.isOpened():
         camera.release()
     sys.exit(0)
