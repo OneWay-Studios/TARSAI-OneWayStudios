@@ -4,9 +4,10 @@
 #sudo apt-get update
 #sudo apt-get install python3-tk
 
+import tkinter as tk
 from adafruit_servokit import ServoKit
 import time
-import tkinter as tk
+
 
 # Initialize servo driver (16 channels)
 kit = ServoKit(channels=16)
